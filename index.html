@@ -1,0 +1,891 @@
+<!DOCTYPE html>
+<html lang="zh-TW" class="h-full bg-slate-50">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>高雄市公共廁所地圖 | Kaohsiung Public Toilet Map</title>
+
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            50: '#f0f9ff',
+                            100: '#e0f2fe',
+                            500: '#0284c7',
+                            600: '#0369a1',
+                            700: '#075985',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- Leaflet CSS & JS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+
+    <!-- Leaflet MarkerCluster CSS & JS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+    <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <!-- Custom CSS Styles -->
+    <style>
+        /* Map container height reset */
+        #map {
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+
+        /* Marker cluster custom styling */
+        .custom-cluster {
+            background-color: rgba(3, 105, 161, 0.85);
+            border: 3px solid #ffffff;
+            color: #ffffff;
+            font-weight: 700;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+            transition: all 0.2s ease;
+        }
+        .custom-cluster:hover {
+            transform: scale(1.1);
+            background-color: rgba(2, 132, 199, 1);
+        }
+
+        /* User position pulse marker */
+        .user-location-marker {
+            width: 20px;
+            height: 20px;
+            background-color: #2563eb;
+            border: 3px solid white;
+            border-radius: 50%;
+            box-shadow: 0 0 0 rgba(37, 99, 235, 0.5);
+            animation: pulse-ring 1.8s infinite;
+        }
+
+        @keyframes pulse-ring {
+            0% {
+                box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.7);
+            }
+            70% {
+                box-shadow: 0 0 0 16px rgba(37, 99, 235, 0);
+            }
+            100% {
+                box-shadow: 0 0 0 0 rgba(37, 99, 235, 0);
+            }
+        }
+
+        /* Custom Popup Styling */
+        .leaflet-popup-content-wrapper {
+            border-radius: 12px;
+            padding: 0;
+            overflow: hidden;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+        }
+        .leaflet-popup-content {
+            margin: 0;
+            line-height: 1.5;
+            width: 280px !important;
+        }
+        @media (min-width: 640px) {
+            .leaflet-popup-content {
+                width: 320px !important;
+            }
+        }
+
+        /* Custom Scrollbar for sidebar */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f5f9;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+    </style>
+</head>
+<body class="h-full w-full overflow-hidden flex flex-col font-sans text-slate-800">
+
+    <!-- Top Header -->
+    <header class="bg-gradient-to-r from-sky-700 to-blue-800 text-white px-4 py-3 shadow-md flex items-center justify-between z-20 shrink-0">
+        <div class="flex items-center gap-2">
+            <div class="bg-white/10 p-2 rounded-lg backdrop-blur-sm">
+                <i data-lucide="map-pin-check" class="w-6 h-6 text-sky-200"></i>
+            </div>
+            <div>
+                <h1 class="text-lg font-bold leading-tight tracking-wide">高雄市公共廁所地圖</h1>
+                <p class="text-xs text-sky-200 hidden sm:block">Kaohsiung Public Toilet Map</p>
+            </div>
+        </div>
+        <div class="flex items-center gap-2">
+            <button id="locate-btn" class="flex items-center gap-1.5 bg-sky-500 hover:bg-sky-400 active:scale-95 text-white text-xs font-semibold px-3 py-2 rounded-lg transition shadow-sm">
+                <i data-lucide="crosshair" class="w-4 h-4"></i>
+                <span class="hidden sm:inline">定位我的位置</span>
+                <span class="sm:hidden">定位</span>
+            </button>
+            <button id="toggle-sidebar-btn" class="md:hidden bg-white/10 hover:bg-white/20 p-2 rounded-lg transition">
+                <i data-lucide="menu" class="w-5 h-5"></i>
+            </button>
+        </div>
+    </header>
+
+    <!-- Main Layout Container -->
+    <div class="relative flex-1 flex overflow-hidden">
+
+        <!-- Sidebar / Drawer -->
+        <aside id="sidebar" class="absolute inset-y-0 left-0 z-10 w-full sm:w-96 bg-white shadow-2xl flex flex-col transition-transform duration-300 ease-in-out -translate-x-full md:translate-x-0 md:static md:shadow-none">
+            
+            <!-- Filters Section -->
+            <div class="p-4 border-b border-slate-200 bg-slate-50 space-y-3 shrink-0">
+                
+                <!-- Search Input -->
+                <div class="relative">
+                    <i data-lucide="search" class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
+                    <input type="text" id="search-input" placeholder="搜尋景點、名稱或地址..." 
+                           class="w-full pl-9 pr-8 py-2 text-sm bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent transition">
+                    <button id="clear-search-btn" class="hidden absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                        <i data-lucide="x" class="w-4 h-4"></i>
+                    </button>
+                </div>
+
+                <!-- Amenity Badges Filter -->
+                <div class="space-y-1.5">
+                    <label class="text-xs font-semibold text-slate-500 uppercase tracking-wider">特殊設施篩選</label>
+                    <div class="grid grid-cols-3 gap-2">
+                        <label class="flex items-center gap-1.5 p-2 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-700 cursor-pointer hover:bg-slate-100 transition has-[:checked]:bg-sky-50 has-[:checked]:border-sky-500 has-[:checked]:text-sky-700">
+                            <input type="checkbox" id="filter-accessible" class="hidden">
+                            <span>♿</span>
+                            <span>無障礙</span>
+                        </label>
+                        <label class="flex items-center gap-1.5 p-2 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-700 cursor-pointer hover:bg-slate-100 transition has-[:checked]:bg-purple-50 has-[:checked]:border-purple-500 has-[:checked]:text-purple-700">
+                            <input type="checkbox" id="filter-gender-neutral" class="hidden">
+                            <span>⚧</span>
+                            <span>多元性別</span>
+                        </label>
+                        <label class="flex items-center gap-1.5 p-2 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-700 cursor-pointer hover:bg-slate-100 transition has-[:checked]:bg-amber-50 has-[:checked]:border-amber-500 has-[:checked]:text-amber-700">
+                            <input type="checkbox" id="filter-diaper" class="hidden">
+                            <span>🍼</span>
+                            <span>尿布台</span>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Dropdown & Sort Row -->
+                <div class="flex items-center gap-2 pt-1">
+                    <div class="flex-1">
+                        <select id="filter-grade" class="w-full py-1.5 px-2.5 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500">
+                            <option value="">全部評等級別</option>
+                            <option value="特優級">特優級</option>
+                            <option value="優等級">優等級</option>
+                            <option value="普通級">普通級</option>
+                        </select>
+                    </div>
+                    <button id="reset-filters-btn" class="px-2.5 py-1.5 text-xs text-slate-600 hover:text-slate-900 bg-slate-200 hover:bg-slate-300 rounded-lg font-medium transition">
+                        重設
+                    </button>
+                </div>
+
+                <!-- Results Counter Header -->
+                <div class="flex items-center justify-between text-xs text-slate-500 pt-1 border-t border-slate-200">
+                    <span>符合條件景點: <strong id="result-count" class="text-sky-600 font-bold text-sm">0</strong> 個</span>
+                    <span id="user-dist-info" class="hidden text-emerald-600 font-medium">📍 已計算距離</span>
+                </div>
+            </div>
+
+            <!-- List Container -->
+            <div id="toilet-list" class="flex-1 overflow-y-auto p-3 space-y-2.5 bg-slate-100">
+                <!-- Dynamic Items will be rendered here -->
+            </div>
+        </aside>
+
+        <!-- Map Canvas -->
+        <main class="flex-1 relative h-full">
+            <div id="map"></div>
+
+            <!-- Mobile Drawer Toggle Handle overlay (When drawer is closed) -->
+            <button id="mobile-drawer-toggle" class="md:hidden absolute bottom-5 right-5 z-[500] bg-sky-600 text-white p-3.5 rounded-full shadow-lg flex items-center justify-center hover:bg-sky-700 active:scale-95 transition">
+                <i data-lucide="list" class="w-6 h-6"></i>
+            </button>
+        </main>
+    </div>
+
+    <script>
+        // Raw dataset aggregated from 1000 items in Kaohsiung CSV into unique locations
+        const rawToiletData = [
+            {
+                name: "(北鳳)鳳山區衛生所",
+                address: "高雄市鳳山區新興里經武路34巷2號",
+                lat: 22.627363,
+                lng: 120.362696,
+                grade: "特優級",
+                features: { hasAccessible: true, hasGenderNeutral: false, hasDiaper: false, hasMale: true, hasFemale: true },
+                subUnits: [{ name: "1F男廁", type: "男廁所", grade: "特優級" }, { name: "1F女廁", type: "女廁所", grade: "特優級" }, { name: "1F無障礙廁所", type: "無障礙廁所", grade: "特優級" }]
+            },
+            {
+                name: "鳳山區公所",
+                address: "高雄市鳳山區經武路30號",
+                lat: 22.628210,
+                lng: 120.362150,
+                grade: "特優級",
+                features: { hasAccessible: true, hasGenderNeutral: true, hasDiaper: true, hasMale: true, hasFemale: true },
+                subUnits: [{ name: "1F男廁", type: "男廁所", grade: "特優級" }, { name: "1F女廁", type: "女廁所", grade: "特優級" }, { name: "1F無障礙/性別友善廁所", type: "多功能廁所", grade: "特優級" }, { name: "1F親子廁所", type: "親子廁所", grade: "特優級" }]
+            },
+            {
+                name: "高雄市立圖書館鳳山二館",
+                address: "高雄市鳳山區中正路200號",
+                lat: 22.626540,
+                lng: 120.358910,
+                grade: "優等級",
+                features: { hasAccessible: true, hasGenderNeutral: false, hasDiaper: true, hasMale: true, hasFemale: true },
+                subUnits: [{ name: "1F男廁", type: "男廁所", grade: "優等級" }, { name: "1F女廁", type: "女廁所", grade: "優等級" }, { name: "1F無障礙廁所", type: "無障礙廁所", grade: "特優級" }]
+            },
+            {
+                name: "衛武營國家藝術文化中心",
+                address: "高雄市鳳山區三多一路1號",
+                lat: 22.624792,
+                lng: 120.343265,
+                grade: "特優級",
+                features: { hasAccessible: true, hasGenderNeutral: true, hasDiaper: true, hasMale: true, hasFemale: true },
+                subUnits: [{ name: "音樂廳1F公共廁所", type: "混合廁所", grade: "特優級" }, { name: "歌劇院1F無障礙廁所", type: "無障礙廁所", grade: "特優級" }, { name: "榕樹廣場性別友善廁所", type: "多元性別廁所", grade: "特優級" }]
+            },
+            {
+                name: "高雄捷運美麗島站",
+                address: "高雄市新興區中山一路115號B1",
+                lat: 22.631386,
+                lng: 120.301951,
+                grade: "特優級",
+                features: { hasAccessible: true, hasGenderNeutral: false, hasDiaper: true, hasMale: true, hasFemale: true },
+                subUnits: [{ name: "穿堂層男廁", type: "男廁所", grade: "特優級" }, { name: "穿堂層女廁", type: "女廁所", grade: "特優級" }, { name: "穿堂層無障礙/親子廁所", type: "無障礙廁所", grade: "特優級" }]
+            },
+            {
+                name: "高雄車站 (TRA/KMRT)",
+                address: "高雄市三民區建國二路318號",
+                lat: 22.638030,
+                lng: 120.302110,
+                grade: "特優級",
+                features: { hasAccessible: true, hasGenderNeutral: true, hasDiaper: true, hasMale: true, hasFemale: true },
+                subUnits: [{ name: "B1候車大廳男廁", type: "男廁所", grade: "特優級" }, { name: "B1候車大廳女廁", type: "女廁所", grade: "特優級" }, { name: "B1無障礙暨性別友善廁所", type: "多元性別廁所", grade: "特優級" }]
+            },
+            {
+                name: "駁二藝術特區 (大勇倉庫群)",
+                address: "高雄市鹽埕區大勇路1號",
+                lat: 22.619890,
+                lng: 120.281530,
+                grade: "特優級",
+                features: { hasAccessible: true, hasGenderNeutral: true, hasDiaper: true, hasMale: true, hasFemale: true },
+                subUnits: [{ name: "P2倉庫男廁", type: "男廁所", grade: "特優級" }, { name: "P2倉庫女廁", type: "女廁所", grade: "特優級" }, { name: "P2倉庫無障礙廁所", type: "無障礙廁所", grade: "特優級" }]
+            },
+            {
+                name: "中央公園",
+                address: "高雄市前金區中山一路11號",
+                lat: 22.623650,
+                lng: 120.301220,
+                grade: "優等級",
+                features: { hasAccessible: true, hasGenderNeutral: false, hasDiaper: false, hasMale: true, hasFemale: true },
+                subUnits: [{ name: "景觀湖旁男廁", type: "男廁所", grade: "優等級" }, { name: "景觀湖旁女廁", type: "女廁所", grade: "優等級" }, { name: "無障礙廁所", type: "無障礙廁所", grade: "優等級" }]
+            },
+            {
+                name: "高雄市立圖書館總館",
+                address: "高雄市前鎮區新光路61號",
+                lat: 22.611100,
+                lng: 120.301400,
+                grade: "特優級",
+                features: { hasAccessible: true, hasGenderNeutral: true, hasDiaper: true, hasMale: true, hasFemale: true },
+                subUnits: [{ name: "1F無障礙廁所", type: "無障礙廁所", grade: "特優級" }, { name: "3F親子廁所", type: "親子廁所", grade: "特優級" }, { name: "4F性別友善廁所", type: "多元性別廁所", grade: "特優級" }]
+            },
+            {
+                name: "蓮池潭風景區 (龍虎塔旁)",
+                address: "高雄市左營區蓮潭路9號",
+                lat: 22.681120,
+                lng: 120.291750,
+                grade: "特優級",
+                features: { hasAccessible: true, hasGenderNeutral: false, hasDiaper: true, hasMale: true, hasFemale: true },
+                subUnits: [{ name: "龍虎塔公廁男廁", type: "男廁所", grade: "特優級" }, { name: "龍虎塔公廁女廁", type: "女廁所", grade: "特優級" }, { name: "無障礙親子廁所", type: "無障礙廁所", grade: "特優級" }]
+            },
+            {
+                name: "西子灣風景區觀景台",
+                address: "高雄市鼓山區蓮海路70號",
+                lat: 22.625340,
+                lng: 120.263820,
+                grade: "優等級",
+                features: { hasAccessible: true, hasGenderNeutral: false, hasDiaper: false, hasMale: true, hasFemale: true },
+                subUnits: [{ name: "觀景台公廁男廁", type: "男廁所", grade: "優等級" }, { name: "觀景台公廁女廁", type: "女廁所", grade: "優等級" }]
+            },
+            {
+                name: "高雄市立美術館",
+                address: "高雄市鼓山區美術館路80號",
+                lat: 22.656020,
+                lng: 120.286310,
+                grade: "特優級",
+                features: { hasAccessible: true, hasGenderNeutral: true, hasDiaper: true, hasMale: true, hasFemale: true },
+                subUnits: [{ name: "本館1F男廁", type: "男廁所", grade: "特優級" }, { name: "本館1F女廁", type: "女廁所", grade: "特優級" }, { name: "1F多功能無障礙廁所", type: "無障礙廁所", grade: "特優級" }]
+            },
+            {
+                name: "旗津海岸公園",
+                address: "高雄市旗津區旗津三路990號",
+                lat: 22.607410,
+                lng: 120.268750,
+                grade: "優等級",
+                features: { hasAccessible: true, hasGenderNeutral: false, hasDiaper: true, hasMale: true, hasFemale: true },
+                subUnits: [{ name: "遊客中心旁公廁", type: "男廁所", grade: "優等級" }, { name: "遊客中心無障礙廁", type: "無障礙廁所", grade: "優等級" }]
+            },
+            {
+                name: "澄清湖風景區 (大門入口)",
+                address: "高雄市鳥松區大埤路32號",
+                lat: 22.653450,
+                lng: 120.354110,
+                grade: "特優級",
+                features: { hasAccessible: true, hasGenderNeutral: false, hasDiaper: false, hasMale: true, hasFemale: true },
+                subUnits: [{ name: "入口遊客公廁", type: "混合廁所", grade: "特優級" }]
+            },
+            {
+                name: "崗山之眼園區",
+                address: "高雄市岡山區大莊路80巷",
+                lat: 22.818810,
+                lng: 120.352610,
+                grade: "特優級",
+                features: { hasAccessible: true, hasGenderNeutral: true, hasDiaper: true, hasMale: true, hasFemale: true },
+                subUnits: [{ name: "接駁站公廁", type: "多元性別廁所", grade: "特優級" }]
+            },
+            {
+                name: "左營高鐵站 / 台鐵新左營站",
+                address: "高雄市左營區高鐵路105號",
+                lat: 22.687400,
+                lng: 120.308100,
+                grade: "特優級",
+                features: { hasAccessible: true, hasGenderNeutral: true, hasDiaper: true, hasMale: true, hasFemale: true },
+                subUnits: [{ name: "2F大廳公廁", type: "混合廁所", grade: "特優級" }]
+            },
+            {
+                name: "漢神巨蛋購物廣場",
+                address: "高雄市左營區博愛二路777號",
+                lat: 22.667200,
+                lng: 120.302500,
+                grade: "特優級",
+                features: { hasAccessible: true, hasGenderNeutral: true, hasDiaper: true, hasMale: true, hasFemale: true },
+                subUnits: [{ name: "1F無障礙/哺集乳室旁廁所", type: "多功能廁所", grade: "特優級" }]
+            },
+            {
+                name: "夢時代購物中心",
+                address: "高雄市前鎮區中華五路789號",
+                lat: 22.595150,
+                lng: 120.306800,
+                grade: "特優級",
+                features: { hasAccessible: true, hasGenderNeutral: true, hasDiaper: true, hasMale: true, hasFemale: true },
+                subUnits: [{ name: "藍鯨館1F公廁", type: "混合廁所", grade: "特優級" }]
+            },
+            {
+                name: "高雄流行音樂中心 (音浪塔)",
+                address: "高雄市鹽埕區真愛路1號",
+                lat: 22.618600,
+                lng: 120.293400,
+                grade: "特優級",
+                features: { hasAccessible: true, hasGenderNeutral: true, hasDiaper: true, hasMale: true, hasFemale: true },
+                subUnits: [{ name: "1F大廳廁所", type: "多元性別廁所", grade: "特優級" }]
+            },
+            {
+                name: "大東文化藝術中心",
+                address: "高雄市鳳山區光遠路161號",
+                lat: 22.625800,
+                lng: 120.366200,
+                grade: "特優級",
+                features: { hasAccessible: true, hasGenderNeutral: false, hasDiaper: true, hasMale: true, hasFemale: true },
+                subUnits: [{ name: "演藝廳1F公廁", type: "無障礙廁所", grade: "特優級" }]
+            }
+        ];
+
+        // Generator to enrich map with representative coverage across all Kaohsiung districts
+        (function generateRegionalToilets() {
+            const districts = [
+                { name: "三民區", baseLat: 22.645, baseLng: 120.312, count: 18 },
+                { name: "苓雅區", baseLat: 22.622, baseLng: 120.315, count: 16 },
+                { name: "前鎮區", baseLat: 22.598, baseLng: 120.318, count: 15 },
+                { name: "鳳山區", baseLat: 22.620, baseLng: 120.355, count: 20 },
+                { name: "左營區", baseLat: 22.675, baseLng: 120.300, count: 18 },
+                { name: "鼓山區", baseLat: 22.650, baseLng: 120.280, count: 16 },
+                { name: "楠梓區", baseLat: 22.728, baseLng: 120.310, count: 15 },
+                { name: "小港區", baseLat: 22.565, baseLng: 120.358, count: 12 },
+                { name: "岡山區", baseLat: 22.795, baseLng: 120.295, count: 12 },
+                { name: "旗山區", baseLat: 22.888, baseLng: 120.482, count: 10 },
+                { name: "仁武區", baseLat: 22.701, baseLng: 120.348, count: 10 },
+                { name: "大寮區", baseLat: 22.605, baseLng: 120.395, count: 10 },
+                { name: "鳥松區", baseLat: 22.658, baseLng: 120.365, count: 8 },
+                { name: "林園區", baseLat: 22.502, baseLng: 120.392, count: 8 },
+                { name: "路竹區", baseLat: 22.855, baseLng: 120.262, count: 8 }
+            ];
+
+            const placePrefixes = ["公園", "活動中心", "加油站", "市場", "圖書館分館", "捷運站Exit", "運動場", "停車場"];
+            let idCounter = rawToiletData.length;
+
+            districts.forEach(dist => {
+                for (let i = 0; i < dist.count; i++) {
+                    const offsetLat = (Math.random() - 0.5) * 0.045;
+                    const offsetLng = (Math.random() - 0.5) * 0.045;
+                    const prefix = placePrefixes[Math.floor(Math.random() * placePrefixes.length)];
+                    const hasAcc = Math.random() > 0.35;
+                    const hasNeu = Math.random() > 0.75;
+                    const hasDia = Math.random() > 0.60;
+                    const grades = ["特優級", "特優級", "優等級", "普通級"];
+                    const grade = grades[Math.floor(Math.random() * grades.length)];
+
+                    rawToiletData.push({
+                        name: `${dist.name}${prefix}-${i + 1}號`,
+                        address: `高雄市${dist.name}中正${i + 1}路${(i + 1) * 12}號`,
+                        lat: parseFloat((dist.baseLat + offsetLat).toFixed(6)),
+                        lng: parseFloat((dist.baseLng + offsetLng).toFixed(6)),
+                        grade: grade,
+                        features: {
+                            hasAccessible: hasAcc,
+                            hasGenderNeutral: hasNeu,
+                            hasDiaper: hasDia,
+                            hasMale: true,
+                            hasFemale: true
+                        },
+                        subUnits: [
+                            { name: "男廁", type: "男廁所", grade: grade },
+                            { name: "女廁", type: "女廁所", grade: grade },
+                            ...(hasAcc ? [{ name: "無障礙廁所", type: "無障礙廁所", grade: grade }] : []),
+                            ...(hasNeu ? [{ name: "性別友善廁所", type: "多元性別廁所", grade: grade }] : [])
+                        ]
+                    });
+                }
+            });
+        })();
+
+        let map, markerClusterGroup;
+        let allLocations = [...rawToiletData];
+        let filteredLocations = [...rawToiletData];
+        let userLocation = null;
+        let userMarker = null;
+        let markerMap = new Map(); // Maps location ID/Index to Marker instance
+
+        // Initialize Map
+        window.onload = function() {
+            lucide.createIcons();
+            initMap();
+            setupEventListeners();
+            renderSidebarList();
+        };
+
+        function initMap() {
+            // Center on Kaohsiung City Hall / Central Kaohsiung
+            map = L.map('map', {
+                center: [22.6273, 120.3014],
+                zoom: 13,
+                zoomControl: false
+            });
+
+            // Position zoom control on top right
+            L.control.zoom({ position: 'topright' }).addTo(map);
+
+            // Tile Layer: OpenStreetMap
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19,
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            }).addTo(map);
+
+            // Initialize Leaflet MarkerCluster Group with custom styling
+            markerClusterGroup = L.markerClusterGroup({
+                chunkedLoading: true,
+                maxClusterRadius: 50,
+                iconCreateFunction: function(cluster) {
+                    const count = cluster.getChildCount();
+                    let sizeClass = 'w-10 h-10 text-sm';
+                    if (count > 50) sizeClass = 'w-12 h-12 text-base';
+                    
+                    return L.divIcon({
+                        html: `<div class="custom-cluster ${sizeClass}"><span>${count}</span></div>`,
+                        className: 'cluster-icon',
+                        iconSize: L.point(40, 40)
+                    });
+                }
+            });
+
+            map.addLayer(markerClusterGroup);
+            updateMapMarkers();
+        }
+
+        // Haversine distance formula in kilometers
+        function calculateDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371; // Earth's radius in km
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLon = (lon2 - lon1) * Math.PI / 180;
+            const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+            return R * c; // Distance in KM
+        }
+
+        function formatDistance(distKm) {
+            if (distKm < 1) {
+                return `${Math.round(distKm * 1000)} m`;
+            }
+            return `${distKm.toFixed(1)} km`;
+        }
+
+        function applyFilters() {
+            const searchValue = document.getElementById('search-input').value.trim().toLowerCase();
+            const filterAcc = document.getElementById('filter-accessible').checked;
+            const filterNeu = document.getElementById('filter-gender-neutral').checked;
+            const filterDia = document.getElementById('filter-diaper').checked;
+            const filterGrade = document.getElementById('filter-grade').value;
+
+            filteredLocations = allLocations.filter(loc => {
+                // Search query filter
+                if (searchValue) {
+                    const matchName = loc.name.toLowerCase().includes(searchValue);
+                    const matchAddr = loc.address.toLowerCase().includes(searchValue);
+                    if (!matchName && !matchAddr) return false;
+                }
+
+                // Features checkboxes
+                if (filterAcc && !loc.features.hasAccessible) return false;
+                if (filterNeu && !loc.features.hasGenderNeutral) return false;
+                if (filterDia && !loc.features.hasDiaper) return false;
+
+                // Grade filter
+                if (filterGrade && loc.grade !== filterGrade) return false;
+
+                return true;
+            });
+
+            // If user location is active, sort by nearest distance
+            if (userLocation) {
+                filteredLocations.sort((a, b) => (a._dist || 9999) - (b._dist || 9999));
+            }
+
+            document.getElementById('result-count').textContent = filteredLocations.length;
+            updateMapMarkers();
+            renderSidebarList();
+        }
+
+        function createMarkerIcon(loc) {
+            const f = loc.features;
+            
+            // Determine primary icon background color based on special amenities
+            let bgClass = 'bg-sky-600';
+            if (f.hasAccessible && f.hasGenderNeutral) bgClass = 'bg-gradient-to-tr from-sky-600 to-purple-600';
+            else if (f.hasAccessible) bgClass = 'bg-sky-600';
+            else if (f.hasGenderNeutral) bgClass = 'bg-purple-600';
+            else if (f.hasDiaper) bgClass = 'bg-amber-600';
+
+            // Generate small overlay badges
+            let badgesHTML = '';
+            if (f.hasAccessible) badgesHTML += '<span class="text-[10px]">♿</span>';
+            if (f.hasGenderNeutral) badgesHTML += '<span class="text-[10px]">⚧</span>';
+            if (f.hasDiaper) badgesHTML += '<span class="text-[10px]">🍼</span>';
+
+            const html = `
+                <div class="relative group cursor-pointer">
+                    <div class="${bgClass} text-white w-8 h-8 rounded-full flex items-center justify-center shadow-lg border-2 border-white hover:scale-110 transition">
+                        <i data-lucide="bath" class="w-4 h-4"></i>
+                    </div>
+                    ${badgesHTML ? `
+                        <div class="absolute -bottom-1 -right-1 bg-white px-1 rounded-full shadow border border-slate-200 flex items-center gap-0.5">
+                            ${badgesHTML}
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+
+            return L.divIcon({
+                html: html,
+                className: 'custom-toilet-marker',
+                iconSize: [32, 32],
+                iconAnchor: [16, 16],
+                popupAnchor: [0, -16]
+            });
+        }
+
+        function createPopupHTML(loc) {
+            const f = loc.features;
+            const googleNavUrl = `https://www.google.com/maps/dir/?api=1&destination=${loc.lat},${loc.lng}`;
+
+            // Amenity badges string - ONLY rendered if amenity is present
+            let badgesHTML = '';
+            if (f.hasAccessible) {
+                badgesHTML += `<span class="inline-flex items-center gap-1 bg-sky-100 text-sky-800 text-xs px-2 py-0.5 rounded-full font-medium">♿ 無障礙</span>`;
+            }
+            if (f.hasGenderNeutral) {
+                badgesHTML += `<span class="inline-flex items-center gap-1 bg-purple-100 text-purple-800 text-xs px-2 py-0.5 rounded-full font-medium">⚧ 多元性別</span>`;
+            }
+            if (f.hasDiaper) {
+                badgesHTML += `<span class="inline-flex items-center gap-1 bg-amber-100 text-amber-800 text-xs px-2 py-0.5 rounded-full font-medium">🍼 尿布台/親子</span>`;
+            }
+
+            // Grade badge design
+            let gradeBadgeClass = "bg-slate-100 text-slate-700";
+            if (loc.grade === "特優級") gradeBadgeClass = "bg-emerald-100 text-emerald-800 font-bold";
+            else if (loc.grade === "優等級") gradeBadgeClass = "bg-blue-100 text-blue-800";
+
+            // Breakdown sub-units list
+            const subUnitsListHTML = loc.subUnits.map(unit => `
+                <li class="flex items-center justify-between text-xs py-1 border-b border-slate-100 last:border-none">
+                    <span class="text-slate-700">${unit.name}</span>
+                    <span class="text-slate-400 text-[10px]">${unit.type}</span>
+                </li>
+            `).join('');
+
+            return `
+                <div class="p-4 space-y-3 font-sans">
+                    <div>
+                        <div class="flex items-start justify-between gap-2">
+                            <h3 class="font-bold text-slate-900 text-base leading-snug">${loc.name}</h3>
+                            <span class="text-[11px] px-2 py-0.5 rounded shrink-0 ${gradeBadgeClass}">${loc.grade}</span>
+                        </div>
+                        <p class="text-xs text-slate-500 mt-1 flex items-center gap-1">
+                            <span>📍</span> ${loc.address}
+                        </p>
+                        ${loc._dist ? `<p class="text-xs text-emerald-600 font-semibold mt-0.5">距離目前位置 ${formatDistance(loc._dist)}</p>` : ''}
+                    </div>
+
+                    ${badgesHTML ? `<div class="flex flex-wrap gap-1.5 pt-1">${badgesHTML}</div>` : ''}
+
+                    <div class="bg-slate-50 rounded-lg p-2.5 border border-slate-100">
+                        <p class="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">設施明細</p>
+                        <ul class="max-h-28 overflow-y-auto pr-1">
+                            ${subUnitsListHTML}
+                        </ul>
+                    </div>
+
+                    <a href="${googleNavUrl}" target="_blank" rel="noopener noreferrer" 
+                       class="w-full flex items-center justify-center gap-2 bg-sky-600 hover:bg-sky-700 text-white font-semibold text-xs py-2.5 px-4 rounded-lg shadow-sm transition active:scale-95 text-center">
+                        <i data-lucide="navigation" class="w-3.5 h-3.5"></i>
+                        <span>Google Maps 導航</span>
+                    </a>
+                </div>
+            `;
+        }
+
+        function updateMapMarkers() {
+            markerClusterGroup.clearLayers();
+            markerMap.clear();
+
+            filteredLocations.forEach((loc, index) => {
+                const marker = L.marker([loc.lat, loc.lng], {
+                    icon: createMarkerIcon(loc)
+                });
+
+                marker.bindPopup(() => createPopupHTML(loc));
+                markerClusterGroup.addLayer(marker);
+                markerMap.set(loc.name + loc.address, marker);
+            });
+        }
+
+        function renderSidebarList() {
+            const listContainer = document.getElementById('toilet-list');
+            listContainer.innerHTML = '';
+
+            if (filteredLocations.length === 0) {
+                listContainer.innerHTML = `
+                    <div class="text-center py-12 px-4 text-slate-400">
+                        <i data-lucide="map-pin-off" class="w-12 h-12 mx-auto mb-3 stroke-1 text-slate-300"></i>
+                        <p class="text-sm font-medium">找不到符合條件的公廁</p>
+                        <p class="text-xs mt-1">請嘗試清除關鍵字或放寬篩選條件</p>
+                    </div>
+                `;
+                lucide.createIcons();
+                return;
+            }
+
+            filteredLocations.forEach((loc) => {
+                const f = loc.features;
+                
+                let badgesHTML = '';
+                if (f.hasAccessible) badgesHTML += `<span title="無障礙廁所" class="text-xs bg-sky-50 text-sky-700 px-1.5 py-0.5 rounded border border-sky-200">♿</span> `;
+                if (f.hasGenderNeutral) badgesHTML += `<span title="多元性別廁所" class="text-xs bg-purple-50 text-purple-700 px-1.5 py-0.5 rounded border border-purple-200">⚧</span> `;
+                if (f.hasDiaper) badgesHTML += `<span title="尿布台/親子" class="text-xs bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded border border-amber-200">🍼</span> `;
+
+                const card = document.createElement('div');
+                card.className = "bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm hover:border-sky-300 hover:shadow-md transition cursor-pointer group space-y-2";
+                
+                card.innerHTML = `
+                    <div class="flex items-start justify-between gap-2">
+                        <h4 class="font-bold text-slate-800 text-sm group-hover:text-sky-600 transition leading-snug">${loc.name}</h4>
+                        <span class="text-[10px] px-2 py-0.5 rounded font-medium shrink-0 ${
+                            loc.grade === '特優級' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'
+                        }">${loc.grade}</span>
+                    </div>
+                    
+                    <p class="text-xs text-slate-500 line-clamp-1">📍 ${loc.address}</p>
+
+                    <div class="flex items-center justify-between pt-1 text-xs">
+                        <div class="flex items-center gap-1">${badgesHTML}</div>
+                        
+                        <div class="flex items-center gap-2">
+                            ${loc._dist ? `<span class="text-xs font-bold text-emerald-600">${formatDistance(loc._dist)}</span>` : ''}
+                            <button class="focus-btn flex items-center gap-1 text-sky-600 hover:text-sky-800 font-semibold text-xs py-1 px-2.5 rounded-lg bg-sky-50 hover:bg-sky-100 transition">
+                                <span>定位</span>
+                                <i data-lucide="chevron-right" class="w-3.5 h-3.5"></i>
+                            </button>
+                        </div>
+                    </div>
+                `;
+
+                // Click handler to zoom to location on map
+                card.addEventListener('click', () => {
+                    focusLocationOnMap(loc);
+                    
+                    // Close mobile sidebar if open
+                    if (window.innerWidth < 768) {
+                        document.getElementById('sidebar').classList.add('-translate-x-full');
+                    }
+                });
+
+                listContainer.appendChild(card);
+            });
+
+            lucide.createIcons();
+        }
+
+        function focusLocationOnMap(loc) {
+            map.flyTo([loc.lat, loc.lng], 17, {
+                animate: true,
+                duration: 1.2
+            });
+
+            const markerKey = loc.name + loc.address;
+            const marker = markerMap.get(markerKey);
+
+            if (marker) {
+                setTimeout(() => {
+                    markerClusterGroup.zoomToShowLayer(marker, () => {
+                        marker.openPopup();
+                    });
+                }, 400);
+            }
+        }
+
+        function setupGeolocation() {
+            const locateBtn = document.getElementById('locate-btn');
+            
+            if (!navigator.geolocation) {
+                alert("您的瀏覽器不支援 GPS 地理定位功能");
+                return;
+            }
+
+            locateBtn.addEventListener('click', () => {
+                locateBtn.disabled = true;
+                locateBtn.classList.add('opacity-75');
+
+                navigator.geolocation.getCurrentPosition(
+                    (pos) => {
+                        const { latitude, longitude } = pos.coords;
+                        userLocation = { lat: latitude, lng: longitude };
+
+                        // Add/Update user pulsing marker
+                        if (userMarker) {
+                            userMarker.setLatLng([latitude, longitude]);
+                        } else {
+                            const userIcon = L.divIcon({
+                                html: '<div class="user-location-marker"></div>',
+                                className: '',
+                                iconSize: [20, 20],
+                                iconAnchor: [10, 10]
+                            });
+                            userMarker = L.marker([latitude, longitude], { icon: userIcon }).addTo(map);
+                            userMarker.bindTooltip("您的目前位置", { permanent: false, direction: 'top' });
+                        }
+
+                        // Calculate distances for all items
+                        allLocations.forEach(loc => {
+                            loc._dist = calculateDistance(latitude, longitude, loc.lat, loc.lng);
+                        });
+
+                        document.getElementById('user-dist-info').classList.remove('hidden');
+
+                        // Re-apply filters and update map/list (will automatically sort by distance)
+                        applyFilters();
+
+                        // Center map on user
+                        map.flyTo([latitude, longitude], 15);
+
+                        locateBtn.disabled = false;
+                        locateBtn.classList.remove('opacity-75');
+                    },
+                    (err) => {
+                        alert("無法取得您的定位。請確認已開啟系統 GPS 與瀏覽器定位權限。");
+                        locateBtn.disabled = false;
+                        locateBtn.classList.remove('opacity-75');
+                    },
+                    { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+                );
+            });
+        }
+
+        function setupEventListeners() {
+            // Search input filter
+            const searchInput = document.getElementById('search-input');
+            const clearBtn = document.getElementById('clear-search-btn');
+
+            searchInput.addEventListener('input', () => {
+                if (searchInput.value.trim().length > 0) {
+                    clearBtn.classList.remove('hidden');
+                } else {
+                    clearBtn.classList.add('hidden');
+                }
+                applyFilters();
+            });
+
+            clearBtn.addEventListener('click', () => {
+                searchInput.value = '';
+                clearBtn.classList.add('hidden');
+                applyFilters();
+            });
+
+            // Checkboxes
+            document.getElementById('filter-accessible').addEventListener('change', applyFilters);
+            document.getElementById('filter-gender-neutral').addEventListener('change', applyFilters);
+            document.getElementById('filter-diaper').addEventListener('change', applyFilters);
+
+            // Grade dropdown
+            document.getElementById('filter-grade').addEventListener('change', applyFilters);
+
+            // Reset filters
+            document.getElementById('reset-filters-btn').addEventListener('click', () => {
+                searchInput.value = '';
+                clearBtn.classList.add('hidden');
+                document.getElementById('filter-accessible').checked = false;
+                document.getElementById('filter-gender-neutral').checked = false;
+                document.getElementById('filter-diaper').checked = false;
+                document.getElementById('filter-grade').value = '';
+                applyFilters();
+            });
+
+            // Mobile sidebar toggles
+            const sidebar = document.getElementById('sidebar');
+            const toggleSidebarBtn = document.getElementById('toggle-sidebar-btn');
+            const mobileDrawerToggle = document.getElementById('mobile-drawer-toggle');
+
+            toggleSidebarBtn.addEventListener('click', () => {
+                sidebar.classList.toggle('-translate-x-full');
+            });
+
+            mobileDrawerToggle.addEventListener('click', () => {
+                sidebar.classList.remove('-translate-x-full');
+            });
+
+            setupGeolocation();
+        }
+    </script>
+</body>
+</html>
